@@ -45,8 +45,8 @@ DURATION = 2.0      # 移动类动作持续时间（秒），最大 10 秒
 SPEED = 0.3         # 移动速度（m/s 或 rad/s），最大 1.0
 
 # 机器狗配置
-# 无线连接使用 192.168.1.200；接网线时使用 192.168.123.18
-ROBOT_IP = "192.168.1.200"
+# 无线连接使用 192.168.1.50；接网线时使用 192.168.123.18
+ROBOT_IP = "192.168.1.50"
 ROBOT_USER = "unitree"
 ROBOT_PASS = os.environ.get("UNITREE_ROBOT_PASSWORD")
 ACTION_RUNNER = "/home/unitree/unitree_sdk2/build/bin/action_runner"

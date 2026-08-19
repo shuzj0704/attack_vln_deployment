@@ -5,7 +5,7 @@
 ## 架构
 
 ```text
-机器狗 (192.168.1.200)                          主机
+机器狗 (192.168.1.50)                           主机
 ├── video_server.py :5000  ───────────────►    ├── video_client.py
 │   D435i JPEG 视频流                            │   显示实时画面
 │                                               │
@@ -31,7 +31,7 @@
 ### 1. 机器狗端
 
 ```bash
-ssh unitree@192.168.1.200
+ssh unitree@192.168.1.50
 cd <robot_project_root>/tcp_framework
 python3 robot/robot_main.py
 ```
@@ -71,7 +71,7 @@ python3 host/video_client.py
 编辑 `config.py`：
 
 ```python
-ROBOT_IP = "192.168.1.200"   # 机器狗 WiFi IP
+ROBOT_IP = "192.168.1.50"    # 机器狗 WiFi IP
 VIDEO_PORT = 5000             # 视频流端口
 CMD_PORT = 6000               # 控制命令端口
 WIDTH = 640                   # 图像宽度
