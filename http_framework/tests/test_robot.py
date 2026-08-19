@@ -7,7 +7,7 @@ from http_framework.robot.action_executor import ActionRunnerExecutor
 from http_framework.robot.client import (
     HTTPProtocolError,
     NavigationLoop,
-    StreamVLNHTTPClient,
+    VLNHTTPClient,
 )
 
 
@@ -47,7 +47,7 @@ class HTTPClientTest(unittest.TestCase):
             "action": "right",
         }
         session = FakeSession([requests.Timeout("late"), FakeResponse(200, expected)])
-        client = StreamVLNHTTPClient(
+        client = VLNHTTPClient(
             "http://gpu:5801",
             retries=1,
             session=session,
@@ -74,7 +74,7 @@ class HTTPClientTest(unittest.TestCase):
                 )
             ]
         )
-        client = StreamVLNHTTPClient("http://gpu:5801", session=session)
+        client = VLNHTTPClient("http://gpu:5801", session=session)
         with self.assertRaises(HTTPProtocolError):
             client.step("episode", 0, "request", b"jpeg")
 
@@ -154,7 +154,7 @@ class NavigationLoopTest(unittest.TestCase):
 
 class ActionRunnerExecutorTest(unittest.TestCase):
     @mock.patch.object(ActionRunnerExecutor, "_run")
-    def test_streamvln_action_semantics(self, run):
+    def test_vln_action_semantics(self, run):
         executor = ActionRunnerExecutor(
             "/opt/unitree/action_runner",
             forward_speed_mps=0.25,

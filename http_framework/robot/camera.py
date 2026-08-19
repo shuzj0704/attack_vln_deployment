@@ -17,8 +17,8 @@ class RealSenseCamera:
         warmup_frames: int = 30,
         frame_timeout_ms: int = 5000,
     ):
-        if (width, height) != (640, 480):
-            raise ValueError("StreamVLN real-world deployment requires 640x480 images")
+        if width <= 0 or height <= 0:
+            raise ValueError("camera width and height must be positive")
         if not 1 <= jpeg_quality <= 100:
             raise ValueError("jpeg_quality must be in [1, 100]")
         self._width = width

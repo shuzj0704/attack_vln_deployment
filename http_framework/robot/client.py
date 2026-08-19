@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Robot-side request/action/capture loop for StreamVLN HTTP deployment."""
+"""Robot-side request/action/capture loop for VLN HTTP deployment."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class HTTPProtocolError(RuntimeError):
     """The GPU server returned an invalid or unsuccessful response."""
 
 
-class StreamVLNHTTPClient:
+class VLNHTTPClient:
     def __init__(
         self,
         server_url: str,
@@ -141,7 +141,7 @@ class StreamVLNHTTPClient:
 class NavigationLoop:
     def __init__(
         self,
-        client: StreamVLNHTTPClient,
+        client: VLNHTTPClient,
         camera: RealSenseCamera,
         executor: ActionExecutor,
         settle_time_s: float = 0.5,
@@ -199,17 +199,19 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--server-url", default=_env("STREAMVLN_SERVER_URL"), required=_env("STREAMVLN_SERVER_URL") is None)
+    parser.add_argument("--server-url", default=_env("VLN_SERVER_URL"), required=_env("VLN_SERVER_URL") is None)
     instruction_group = parser.add_mutually_exclusive_group(required=True)
     instruction_group.add_argument("--instruction")
     instruction_group.add_argument("--instruction-file")
     parser.add_argument("--action-runner", default=_env("UNITREE_ACTION_RUNNER", "action_runner"))
-    parser.add_argument("--connect-timeout", type=float, default=float(_env("STREAMVLN_CONNECT_TIMEOUT", "5")))
-    parser.add_argument("--read-timeout", type=float, default=float(_env("STREAMVLN_READ_TIMEOUT", "150")))
-    parser.add_argument("--retries", type=int, default=int(_env("STREAMVLN_HTTP_RETRIES", "1")))
-    parser.add_argument("--settle-time", type=float, default=float(_env("STREAMVLN_SETTLE_TIME", "0.5")))
-    parser.add_argument("--max-steps", type=int, default=int(_env("STREAMVLN_MAX_STEPS", "500")))
-    parser.add_argument("--jpeg-quality", type=int, default=int(_env("STREAMVLN_JPEG_QUALITY", "90")))
+    parser.add_argument("--connect-timeout", type=float, default=float(_env("VLN_CONNECT_TIMEOUT", "5")))
+    parser.add_argument("--read-timeout", type=float, default=float(_env("VLN_READ_TIMEOUT", "150")))
+    parser.add_argument("--retries", type=int, default=int(_env("VLN_HTTP_RETRIES", "1")))
+    parser.add_argument("--settle-time", type=float, default=float(_env("VLN_SETTLE_TIME", "0.5")))
+    parser.add_argument("--max-steps", type=int, default=int(_env("VLN_MAX_STEPS", "500")))
+    parser.add_argument("--jpeg-quality", type=int, default=int(_env("VLN_JPEG_QUALITY", "90")))
+    parser.add_argument("--camera-width", type=int, default=int(_env("VLN_CAMERA_WIDTH", "640")))
+    parser.add_argument("--camera-height", type=int, default=int(_env("VLN_CAMERA_HEIGHT", "480")))
     parser.add_argument("--camera-fps", type=int, default=int(_env("REALSENSE_CAMERA_FPS", "30")))
     parser.add_argument("--forward-speed", type=float, default=float(_env("UNITREE_FORWARD_SPEED", "0.25")))
     parser.add_argument("--turn-speed-deg", type=float, default=float(_env("UNITREE_TURN_SPEED_DEG", "15")))
@@ -231,7 +233,7 @@ def _read_instruction(args: argparse.Namespace) -> str:
 def main() -> None:
     args = parse_args()
     instruction = _read_instruction(args)
-    client = StreamVLNHTTPClient(
+    client = VLNHTTPClient(
         args.server_url,
         connect_timeout_s=args.connect_timeout,
         read_timeout_s=args.read_timeout,
@@ -243,6 +245,8 @@ def main() -> None:
         turn_speed_radps=math.radians(args.turn_speed_deg),
     )
     camera = RealSenseCamera(
+        width=args.camera_width,
+        height=args.camera_height,
         jpeg_quality=args.jpeg_quality,
         camera_fps=args.camera_fps,
     )

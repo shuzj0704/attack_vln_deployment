@@ -1,8 +1,14 @@
 import io
 import unittest
+from unittest import mock
 
-from http_framework.protocol import EpisodeService, InferenceError, ProtocolError
-from http_framework.server import create_app
+from http_framework.protocol import (
+    EpisodeService,
+    InferenceError,
+    ProtocolError,
+    first_legal_action,
+)
+from http_framework.server import create_app, load_backend
 
 
 class FakeBackend:
@@ -45,6 +51,10 @@ class EpisodeServiceTest(unittest.TestCase):
         self.assertEqual("forward", first["action"])
         self.assertEqual("right", second["action"])
         self.assertEqual(2, len(self.backend.step_calls))
+
+    def test_backend_may_return_one_action(self):
+        self.assertEqual("forward", first_legal_action("forward"))
+        self.assertEqual("left", first_legal_action(2))
 
     def test_duplicate_step_does_not_advance_backend(self):
         first = self.service.step(self.episode_id, 0, "step-0", b"same-jpeg")
@@ -132,6 +142,25 @@ class FlaskProtocolTest(unittest.TestCase):
         response = self.client.post("/reset", json={"instruction": "missing id"})
         self.assertEqual(400, response.status_code)
         self.assertEqual("bad_request", response.get_json()["error"])
+
+
+class BackendLoadingTest(unittest.TestCase):
+    @mock.patch("http_framework.server.importlib.import_module")
+    def test_loads_zero_argument_factory(self, import_module):
+        backend = FakeBackend()
+        module = mock.Mock()
+        module.create_backend.return_value = backend
+        import_module.return_value = module
+
+        loaded = load_backend("my_vln.deployment:create_backend")
+
+        self.assertIs(backend, loaded)
+        import_module.assert_called_once_with("my_vln.deployment")
+        module.create_backend.assert_called_once_with()
+
+    def test_rejects_invalid_factory_spec(self):
+        with self.assertRaisesRegex(ValueError, "module:callable"):
+            load_backend("missing_separator")
 
 
 if __name__ == "__main__":

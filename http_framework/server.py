@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""GPU-side HTTP server for single-step StreamVLN deployment."""
+"""GPU-side HTTP server for a pluggable single-step VLN backend."""
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import os
 from typing import Any, Dict, Optional
 
-from http_framework.protocol import EpisodeService, InferenceError, ProtocolError
+from http_framework.protocol import (
+    EpisodeService,
+    InferenceBackend,
+    InferenceError,
+    ProtocolError,
+)
 
 
 def create_app(service: EpisodeService, max_image_bytes: int = 5 * 1024 * 1024):
@@ -74,35 +80,47 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     return os.environ.get(name, default)
 
 
+def load_backend(factory_spec: str) -> InferenceBackend:
+    """Load a zero-argument backend factory from ``module:callable``."""
+    try:
+        module_name, factory_name = factory_spec.rsplit(":", 1)
+    except ValueError as exc:
+        raise ValueError("backend factory must use the format module:callable") from exc
+    if not module_name or not factory_name:
+        raise ValueError("backend factory must use the format module:callable")
+
+    module = importlib.import_module(module_name)
+    factory = getattr(module, factory_name, None)
+    if not callable(factory):
+        raise TypeError(f"backend factory is not callable: {factory_spec}")
+    backend = factory()
+    for method_name in ("reset", "step", "close"):
+        if not callable(getattr(backend, method_name, None)):
+            raise TypeError(f"backend is missing callable method: {method_name}")
+    return backend
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=_env("STREAMVLN_HTTP_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(_env("STREAMVLN_HTTP_PORT", "5801")))
-    parser.add_argument("--streamvln-root", default=_env("STREAMVLN_ROOT"), required=_env("STREAMVLN_ROOT") is None)
-    parser.add_argument("--model-path", default=_env("STREAMVLN_MODEL_PATH"), required=_env("STREAMVLN_MODEL_PATH") is None)
-    parser.add_argument("--device", default=_env("STREAMVLN_DEVICE", "cuda:0"))
-    parser.add_argument("--num-future-steps", type=int, default=int(_env("STREAMVLN_NUM_FUTURE_STEPS", "4")))
-    parser.add_argument("--num-frames", type=int, default=int(_env("STREAMVLN_NUM_FRAMES", "32")))
-    parser.add_argument("--num-history", type=int, default=int(_env("STREAMVLN_NUM_HISTORY", "8")))
-    parser.add_argument("--model-max-length", type=int, default=int(_env("STREAMVLN_MODEL_MAX_LENGTH", "4096")))
-    parser.add_argument("--max-image-bytes", type=int, default=int(_env("STREAMVLN_MAX_IMAGE_BYTES", str(5 * 1024 * 1024))))
+    parser.add_argument("--host", default=_env("VLN_HTTP_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(_env("VLN_HTTP_PORT", "5801")))
+    parser.add_argument(
+        "--backend-factory",
+        default=_env("VLN_BACKEND_FACTORY", "http_framework.vln_backend:create_backend"),
+        help="zero-argument backend factory in module:callable format",
+    )
+    parser.add_argument(
+        "--max-image-bytes",
+        type=int,
+        default=int(_env("VLN_MAX_IMAGE_BYTES", str(5 * 1024 * 1024))),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    # Heavy ML imports and model loading happen only for the executable server.
-    from http_framework.streamvln_backend import StreamVLNBackend
-
-    backend = StreamVLNBackend(
-        streamvln_root=args.streamvln_root,
-        model_path=args.model_path,
-        device=args.device,
-        num_future_steps=args.num_future_steps,
-        num_frames=args.num_frames,
-        num_history=args.num_history,
-        model_max_length=args.model_max_length,
-    )
+    # Model-specific imports and checkpoint loading stay inside the selected factory.
+    backend = load_backend(args.backend_factory)
     app = create_app(EpisodeService(backend), max_image_bytes=args.max_image_bytes)
     logging.getLogger("werkzeug").setLevel(logging.INFO)
     app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)

@@ -1,4 +1,4 @@
-"""Thread-safe protocol state for receding-horizon StreamVLN deployment."""
+"""Thread-safe protocol state for receding-horizon VLN deployment."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, Optional, Protocol, Union
 VALID_ACTIONS = ("forward", "left", "right", "stop")
 ACTION_IDS = {0: "stop", 1: "forward", 2: "left", 3: "right"}
 ActionValue = Union[str, int]
+BackendOutput = Union[ActionValue, Iterable[ActionValue]]
 
 
 class ProtocolError(Exception):
@@ -28,12 +29,12 @@ class InferenceError(RuntimeError):
 
 
 class InferenceBackend(Protocol):
-    """Minimal interface implemented by the GPU-side StreamVLN adapter."""
+    """Interface that a GPU-side VLN adapter must implement."""
 
     def reset(self, instruction: str) -> None:
         ...
 
-    def step(self, jpeg_bytes: bytes, instruction: str) -> Iterable[ActionValue]:
+    def step(self, jpeg_bytes: bytes, instruction: str) -> BackendOutput:
         ...
 
     def close(self) -> None:
@@ -56,10 +57,12 @@ def _require_nonempty_string(value: Any, name: str, max_length: int = 4096) -> s
     return value
 
 
-def first_legal_action(actions: Iterable[ActionValue]) -> str:
-    """Return the first legal primitive from a generated action sequence."""
+def first_legal_action(actions: BackendOutput) -> str:
+    """Normalize one action or return the first legal action in a sequence."""
     if actions is None:
         return "stop"
+    if isinstance(actions, (str, int)):
+        actions = (actions,)
     for raw_action in actions:
         if isinstance(raw_action, bool):
             continue
@@ -122,7 +125,7 @@ class EpisodeService:
             except Exception as exc:
                 self._failed = True
                 self._closed = True
-                raise InferenceError("StreamVLN reset failed; no episode was started") from exc
+                raise InferenceError("VLN backend reset failed; no episode was started") from exc
             self._episode_id = str(uuid.uuid4())
             self._instruction = instruction
             self._next_step_id = 0
@@ -206,7 +209,7 @@ class EpisodeService:
                 # Backend state may already have changed; never continue this episode.
                 self._failed = True
                 self._closed = True
-                raise InferenceError("StreamVLN inference failed; episode was closed") from exc
+                raise InferenceError("VLN backend inference failed; episode was closed") from exc
 
             self._steps[step_id] = StepRecord(request_id, image_sha256, action)
             self._request_steps[request_id] = step_id
