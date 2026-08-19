@@ -20,7 +20,7 @@ Go2-W 算力板网络信息：
 | 无线 IP | `192.168.1.50`    | 当前通过 Wi-Fi `HCAI_5G` 连接的静态 IP |
 | 有线 IP | `192.168.123.18`  | 机身尾部网线直连时使用，拔线后不可达    |
 | 用户名  | `unitree`         |                                         |
-| 密码    | `<set-on-device>` | 不要提交真实密码                         |
+| 密码    | `<set-on-device>` | 不要提交真实密码                        |
 
 > 当前推荐使用无线 IP `192.168.1.50`，无需插网线。该地址于 2026-08-19
 > 从 `192.168.1.200` 迁移，以避开已确认的 IPv4 地址冲突。建议在路由器中为
@@ -38,11 +38,13 @@ ssh unitree@192.168.1.50
 
 ## 2. 自定义 VLN HTTP 部署
 
-HTTP 方案的源代码当前位于本地仓库，并未自动复制或启动到 Unitree：
+本仓库内容已通过 rsync 部署到 Unitree Go2-W：
 
 ```text
-attack_vln_deployment/http_framework/
+unitree@192.168.1.50:/home/unitree/workspace/hkd/attack_vln_deployment
 ```
+
+其中 `http_framework/` 与 `tcp_framework/` 均已同步。
 
 实际部署分工如下：
 
@@ -51,14 +53,14 @@ attack_vln_deployment/http_framework/
 | GPU 服务器    | `python3 -m http_framework.server`       | 加载自定义 VLN、维护 model memory、返回一个离散 action |
 | Unitree Go2-W | `python3 -m http_framework.robot.client` | D435i 拍照、HTTP 请求、执行动作和本地 StopMove         |
 
-如果当前仓库就在 GPU 服务器上，server 可直接从当前目录运行。Unitree 侧至少需要
-复制 `http_framework/`；不需要把 VLN checkpoint 复制到机器人。示例：
+如果当前仓库就在 GPU 服务器上，server 可直接从当前目录运行。Unitree 侧不需要把
+VLN checkpoint 复制到机器人。若后续需要重新同步整个仓库，可执行：
 
 ```bash
-# 在本地 attack_vln_deployment 根目录执行；尖括号内容由部署者提供
+# 在本地 attack_vln_deployment 根目录执行
 rsync -av --exclude '__pycache__' \
-  http_framework/ \
-  <robot_user>@<robot_host>:<robot_project_root>/http_framework/
+  . \
+  unitree@192.168.1.50:/home/unitree/workspace/hkd/attack_vln_deployment/
 ```
 
 然后分别启动：
@@ -70,11 +72,11 @@ python3 -m http_framework.server \
   --host 0.0.0.0 \
   --port 5801
 
-# Unitree：在机器人上的 attack_vln_deployment 根目录
+# Unitree：/home/unitree/workspace/hkd/attack_vln_deployment
 python3 -m http_framework.robot.client \
   --server-url http://<gpu_server_host>:5801 \
   --instruction "<navigation_instruction>" \
-  --action-runner <action_runner_path>
+  --action-runner /home/unitree/unitree_sdk2/build/bin/action_runner
 ```
 
 完整协议、环境依赖、环境变量和安全说明见
@@ -101,7 +103,7 @@ ss -tlnp | grep -E '5000|6000'
 应看到 `0.0.0.0:5000`（视频）和 `0.0.0.0:6000`（命令）处于 `LISTEN` 状态。若未启动，执行：
 
 ```bash
-cd <robot_project_root>/tcp_framework
+cd /home/unitree/workspace/hkd/attack_vln_deployment/tcp_framework
 nohup python3 robot/robot_main.py > /tmp/tcp_framework.log 2>&1 &
 ```
 
@@ -121,7 +123,7 @@ nc -zv 192.168.1.50 5000
 nc -zv 192.168.1.50 6000
 
 # 4. 发送单次控制命令
-cd <local_project_root>/tcp_framework
+cd /home/shu22/navigation/indoor_vln/attack_vln_deployment/tcp_framework
 python3 host/cmd_client.py forward
 python3 host/cmd_client.py left
 python3 host/cmd_client.py right
