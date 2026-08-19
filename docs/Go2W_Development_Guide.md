@@ -1,6 +1,9 @@
 # Unitree Go2-W 远程开发与基础运动控制指南
 
-> 本 README 主要面向需要在本地 PC 上远程连接 Go2-W 机器狗开发板、并基于 Unitree 官方 SDK 进行基础运动控制开发的场景。内容整理自 [Unitree 官方文档](https://support.unitree.com/home/zh/Go2-W_developer/Basic_motion_control) 及社区常见实践。
+> 本指南主要面向需要在本地 PC 上远程连接 Go2-W 机器狗开发板、并基于 Unitree 官方 SDK 进行基础运动控制开发的场景。内容整理自 [Unitree 官方文档](https://support.unitree.com/home/zh/Go2-W_developer/Basic_motion_control) 及社区常见实践。
+>
+> 本文只介绍 Go2-W 通用开发流程。具体项目的当前 IP、SSID、MAC、部署入口和已知问题
+> 应记录在项目根目录 `README.md`，不要写入本通用指南。
 
 ---
 
@@ -20,21 +23,21 @@
 
 ### 1.1 网络信息
 
-Go2-W 开发板（算力板 / 拓展坞）当前实际网络配置如下：
+Go2-W 开发板通常支持有线直连和外接 Wi-Fi 两种开发方式。实际值应以设备上的
+`ip address`、`ip route` 和 `nmcli connection show` 输出为准。
 
-| 项目            | 值                                                     | 说明                                 |
-| --------------- | ------------------------------------------------------ | ------------------------------------ |
-| 无线 IP         | `192.168.1.200`                                      | 连接 Wi-Fi`HCAI_5G` 后的静态 IP    |
-| 有线 IP         | `192.168.123.18`                                     | 机身尾部网线直连时使用，拔线后不可达 |
-| 用户名          | `unitree`                                            |                                      |
-| 密码            | `<set-on-device>`                                    | 不要提交真实密码                     |
-| 无线连接方式    | 通过 USB Wi-Fi 网卡连接路由器                          | 当前推荐方式，无需网线               |
-| 有线连接方式    | 机身尾部网口（RJ45）                                   | 稳定性最好，适合首次调试             |
-| 推荐 PC 静态 IP | `192.168.123.x`（x ≠ 18，例如 `192.168.123.222`） | 仅在有线直连时使用                   |
-| 子网掩码        | `255.255.255.0`                                      |                                      |
-| 网关            | `192.168.1.1`（无线）/ `192.168.123.1`（有线）     |                                      |
+| 项目 | 常用值/占位符 | 说明 |
+|---|---|---|
+| 无线 IP | `<robot_wifi_ip>` | 由现场路由器的 DHCP 或静态配置决定 |
+| 有线 IP | `192.168.123.18` | 常见直连地址；不同固件应先确认 |
+| 用户名 | `unitree` | 以设备实际账户为准 |
+| 密码 | `<set-on-device>` | 不要写入代码或文档 |
+| 无线连接 | USB Wi-Fi 网卡或设备支持的无线网卡 | PC 与 Go2-W 应连接同一 WLAN |
+| 有线连接 | 机身尾部网口（RJ45） | 适合首次配置和故障回退 |
+| PC 有线地址 | `192.168.123.x/24` | `x` 不得与机器人或其他设备重复 |
 
-> 提示：当前仓库已默认使用无线 IP `192.168.1.200`。如果接回网线，请把相关命令中的 IP 替换为 `192.168.123.18`。
+使用静态无线地址前，应确认路由器 DHCP 地址池，并优先按机器人无线 MAC 配置
+DHCP reservation。不要直接复制其他项目的 IP、SSID 或 MAC。
 
 ### 1.2 PC 端设置静态 IP
 
@@ -60,7 +63,8 @@ sudo ip link set eth0 up
 
 ```bash
 # 无线连接时
-ping 192.168.1.200
+ROBOT_WIFI_IP=192.168.1.X  # 将 X 替换为设备实际地址
+ping "$ROBOT_WIFI_IP"
 
 # 有线连接时
 ping 192.168.123.18
@@ -74,10 +78,11 @@ ping 192.168.123.18
 
 ### 2.1 SSH 登录
 
-当前使用无线 IP：
+使用无线连接：
 
 ```bash
-ssh unitree@192.168.1.200
+ROBOT_WIFI_IP=192.168.1.X  # 将 X 替换为设备实际地址
+ssh "unitree@$ROBOT_WIFI_IP"
 # 输入设备当前配置的密码
 ```
 
@@ -93,20 +98,22 @@ ssh unitree@192.168.123.18
 
 1. 在本地 PC 的 VS Code 中安装扩展 **Remote - SSH**。
 2. 按 `Ctrl+Shift+P` → 选择 **Remote-SSH: Connect to Host...**
-3. 输入 `unitree@192.168.1.200` 并连接（有线时使用 `unitree@192.168.123.18`）。
+3. 输入 `unitree@<robot_wifi_ip>` 并连接（有线时使用 `unitree@192.168.123.18`）。
 4. 输入设备当前配置的密码，即可像本地一样浏览、编辑和调试开发板上的代码。
 
 ### 2.3 文件传输
 
 ```bash
+ROBOT_WIFI_IP=192.168.1.X  # 将 X 替换为设备实际地址
+
 # 从 PC 上传文件/目录到开发板（无线）
-scp -r ./your_project unitree@192.168.1.200:/home/unitree/
+scp -r ./your_project "unitree@$ROBOT_WIFI_IP:/home/unitree/"
 
 # 从开发板下载文件到 PC（无线）
-scp -r unitree@192.168.1.200:/home/unitree/your_project ./
+scp -r "unitree@$ROBOT_WIFI_IP:/home/unitree/your_project" ./
 ```
 
-如果接回网线，将 `192.168.1.200` 替换为 `192.168.123.18`。
+如果接回网线，将 `<robot_wifi_ip>` 替换为设备实际的有线地址。
 
 ### 2.4 远程桌面（可选）
 
@@ -116,7 +123,8 @@ scp -r unitree@192.168.1.200:/home/unitree/your_project ./
 bash ~/nomachine.sh
 ```
 
-然后在 PC 端安装 [NoMachine 客户端](https://www.nomachine.com/)，通过 IP `192.168.1.200` 连接即可（有线时用 `192.168.123.18`）。
+然后在 PC 端安装 [NoMachine 客户端](https://www.nomachine.com/)，通过
+`<robot_wifi_ip>` 连接即可；有线时使用设备实际的有线地址。
 
 ---
 
@@ -298,11 +306,21 @@ int main()
 
 ### Q1：SSH 连接失败或提示连接超时
 
-- 确认当前使用正确的 IP：无线用 `192.168.1.200`，有线用 `192.168.123.18`。
-- 无线连接时，确认机器狗和 PC 连入同一个 Wi-Fi（如 `HCAI_5G`）。
+- 通过 `ip address` 确认机器人当前的有线或无线 IP，不要照搬其他环境的地址。
+- 无线连接时，确认机器狗和 PC 连入同一个 Wi-Fi。
 - 有线连接时，确认网线已插紧，PC 已设置为 `192.168.123.x/24` 网段（x ≠ 18）。
 - 尝试关闭 PC 防火墙或允许该网段通信。
 - 检查机器狗是否已正常开机并进入可开发状态。
+
+如果无线连接时出现“有时能登录、有时密码错误”，先确认 ARP 是否指向 Unitree：
+
+```bash
+ROBOT_WIFI_IP=192.168.1.X  # 将 X 替换为设备实际地址
+ip neigh show "$ROBOT_WIFI_IP"
+```
+
+将结果中的 MAC 与机器人 `ip link show wlan0` 输出进行比较。如果不一致，说明可能存在
+IPv4 地址冲突，应在路由器中检查 DHCP lease/static reservation，而不是反复重启设备。
 
 ### Q2：能 ping 通但 SSH 提示密码错误
 
