@@ -1,22 +1,22 @@
 # attack_vln_deployment
 
-Unitree Go2-W 的 StreamVLN 真机部署与基础运动控制项目。
+Unitree Go2-W 的自定义 VLN 真机部署与基础运动控制项目。
 
 本仓库提供两套互不覆盖的通信方案：
 
-- `http_framework/`：StreamVLN 无 ROS 真机部署，推荐用于 GPU 推理闭环。
+- `http_framework/`：模型无关的 VLN HTTP 部署框架，预留自定义 backend 接口。
 - `tcp_framework/`：原有 TCP 视频与手动控制方案，保留作为回退。
 
 ## 1. 连接开发板
 
 Go2-W 算力板网络信息：
 
-| 项目    | 值                 | 说明                                    |
-| ------- | ------------------ | --------------------------------------- |
-| 无线 IP | `192.168.1.200`  | 当前通过 Wi-Fi`HCAI_5G` 连接的静态 IP |
-| 有线 IP | `192.168.123.18` | 机身尾部网线直连时使用，拔线后不可达    |
-| 用户名  | `unitree`        |                                         |
-| 密码    | `<set-on-device>` | 不要提交真实密码                         |
+| 项目    | 值                  | 说明                                    |
+| ------- | ------------------- | --------------------------------------- |
+| 无线 IP | `192.168.1.200`   | 当前通过 Wi-Fi`HCAI_5G` 连接的静态 IP |
+| 有线 IP | `192.168.123.18`  | 机身尾部网线直连时使用，拔线后不可达    |
+| 用户名  | `unitree`         |                                         |
+| 密码    | `<set-on-device>` | 不要提交真实密码                        |
 
 > 当前推荐使用无线 IP `192.168.1.200`，无需插网线。只有需要稳定有线调试时才接网线使用 `192.168.123.18`。
 
@@ -29,7 +29,7 @@ ssh unitree@192.168.1.200
 # 输入设备当前配置的密码
 ```
 
-## 2. StreamVLN HTTP 部署
+## 2. 自定义 VLN HTTP 部署
 
 HTTP 方案的源代码当前位于本地仓库，并未自动复制或启动到 Unitree：
 
@@ -39,13 +39,13 @@ attack_vln_deployment/http_framework/
 
 实际部署分工如下：
 
-| 位置 | 运行程序 | 负责内容 |
-|---|---|---|
-| GPU 服务器 | `python3 -m http_framework.server` | 加载 StreamVLN、维护 model memory、返回一个离散 action |
-| Unitree Go2-W | `python3 -m http_framework.robot.client` | D435i 拍照、HTTP 请求、执行动作和本地 StopMove |
+| 位置          | 运行程序                                   | 负责内容                                               |
+| ------------- | ------------------------------------------ | ------------------------------------------------------ |
+| GPU 服务器    | `python3 -m http_framework.server`       | 加载自定义 VLN、维护 model memory、返回一个离散 action |
+| Unitree Go2-W | `python3 -m http_framework.robot.client` | D435i 拍照、HTTP 请求、执行动作和本地 StopMove         |
 
 如果当前仓库就在 GPU 服务器上，server 可直接从当前目录运行。Unitree 侧至少需要
-复制 `http_framework/`；不需要复制 StreamVLN checkpoint。示例：
+复制 `http_framework/`；不需要把 VLN checkpoint 复制到机器人。示例：
 
 ```bash
 # 在本地 attack_vln_deployment 根目录执行；尖括号内容由部署者提供
@@ -59,8 +59,7 @@ rsync -av --exclude '__pycache__' \
 ```bash
 # GPU 服务器：在 attack_vln_deployment 根目录
 python3 -m http_framework.server \
-  --streamvln-root <streamvln_root> \
-  --model-path <checkpoint_path> \
+  --backend-factory <python_module>:<factory_function> \
   --host 0.0.0.0 \
   --port 5801
 
@@ -74,6 +73,10 @@ python3 -m http_framework.robot.client \
 完整协议、环境依赖、环境变量和安全说明见
 [`http_framework/README.md`](./http_framework/README.md)。首次运行前必须确认
 `action_runner stop` 会在机器人本地调用 Unitree SDK2 `StopMove`。
+
+默认接口模板位于 `http_framework/vln_backend.py`。需要实现 `reset()`、`step()`、
+`close()`，或通过 `--backend-factory` 指向你自己的适配模块；仓库不包含具体 VLN
+模型、checkpoint 加载逻辑或推理实现。
 
 ## 3. TCP 无线控制框架测试
 
