@@ -1,0 +1,30 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+
+# Local IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+
+# Runtime logs and generated outputs
+*.log
+runs/
+outputs/
+results/
+
+# Model and experiment artifacts
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# Local D435i captures (keep source code in vision/)
+vision/*.png
+vision/*.jpg
+vision/*.jpeg
