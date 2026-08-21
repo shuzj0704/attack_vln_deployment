@@ -77,7 +77,9 @@ curl -fsS http://127.0.0.1:5801/health
 
 该测试不加载模型，也不会自行连接 Robot。
 
-## 2. GPU 端启动真实 StreamVLN
+## 2. GPU 端启动真实 StreamVLN 或自定义 policy
+
+### 2.1 启动 StreamVLN 原模型
 
 先按 StreamVLN 原仓库安装模型依赖并准备 checkpoint，然后在项目根目录运行：
 
@@ -96,6 +98,78 @@ python3 -m streamvln_framework.host.server \
 ```bash
 curl -fsS http://127.0.0.1:5801/health
 ```
+
+### 2.2 接入自定义 policy server（方案 A）
+
+如果你的 policy 部署在另一个仓库，**不需要改当前仓库的代码**。只要你的 bridge/policy server 提供和这里兼容的 `POST /eval_vln` 接口，Robot 端的 `client.py` 就能直接连过去。
+
+**接口约定**
+
+请求：
+
+```http
+POST /eval_vln
+Content-Type: multipart/form-data
+
+image: <当前 RGB JPEG>
+json: {"reset": true|false}
+```
+
+响应：
+
+```json
+{"action": [1, 2, 3, ...]}
+```
+
+action ID 约定：
+
+| ID | 动作 |
+| -- | ---- |
+| 0 | stop |
+| 1 | forward（约 0.25 m） |
+| 2 | left（约 +15°） |
+| 3 | right（约 -15°） |
+
+> `reset` 语义：client 第一次请求会带 `reset=true`，之后都是 `reset=false`，policy 可以据此重置 episode 状态。
+
+**最小 Flask 示例**
+
+在你的 policy 仓库里实现：
+
+```python
+from flask import Flask, request, jsonify
+import json
+
+app = Flask(__name__)
+
+@app.get("/health")
+def health():
+    return jsonify({"status": "ready"})
+
+@app.post("/eval_vln")
+def eval_vln():
+    image_file = request.files.get("image")
+    metadata = json.loads(request.form.get("json", "{}"))
+    reset = metadata.get("reset", False)
+
+    # 这里调用你自己的 policy，返回 action ID 列表
+    actions = my_policy(image_file, reset)
+
+    return jsonify({"action": actions})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5801, threaded=False)
+```
+
+启动你的 policy server 后，Robot 端直接指向它：
+
+```bash
+python3 -m streamvln_framework.robot.client \
+  --server-url http://<policy_server_ip>:5801 \
+  --action-runner /home/unitree/unitree_sdk2/build/bin/action_runner
+```
+
+如果你的 policy 输出的是速度/目标点而不是离散 action ID，则需要在 policy 仓库或 bridge 里做一层转换，再返回 `[1,2,3]` 这种格式；或者改用 [方案 B](#5-rgb-通信测试) 的 `/rgb` + `/action` 接口逐帧控制。
 
 `5801` 也是 `http_framework` 默认端口，同一台 GPU 上一次只能启动其中一个 server；需要同时运行时给其中一个指定其他端口，并同步修改 Robot 的 `--server-url`。
 
