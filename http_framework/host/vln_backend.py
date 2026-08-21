@@ -35,5 +35,5 @@ class VLNBackend:
 
 
 def create_backend() -> InferenceBackend:
-    """Default zero-argument factory used by ``http_framework.server``."""
+    """Default zero-argument factory used by ``http_framework.host.server``."""
     return VLNBackend()

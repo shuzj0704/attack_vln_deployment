@@ -8,7 +8,7 @@ from http_framework.protocol import (
     ProtocolError,
     first_legal_action,
 )
-from http_framework.server import create_app, load_backend
+from http_framework.host.server import create_app, load_backend
 
 
 class FakeBackend:
@@ -145,7 +145,7 @@ class FlaskProtocolTest(unittest.TestCase):
 
 
 class BackendLoadingTest(unittest.TestCase):
-    @mock.patch("http_framework.server.importlib.import_module")
+    @mock.patch("http_framework.host.server.importlib.import_module")
     def test_loads_zero_argument_factory(self, import_module):
         backend = FakeBackend()
         module = mock.Mock()
@@ -161,6 +161,14 @@ class BackendLoadingTest(unittest.TestCase):
     def test_rejects_invalid_factory_spec(self):
         with self.assertRaisesRegex(ValueError, "module:callable"):
             load_backend("missing_separator")
+
+    def test_smoke_backend_is_safe_stop_only(self):
+        backend = load_backend("http_framework.examples.smoke_backend:create_backend")
+        backend.reset("communication smoke test")
+        self.assertEqual(
+            "stop",
+            backend.step(b"non-empty protocol test image", "communication smoke test"),
+        )
 
 
 if __name__ == "__main__":

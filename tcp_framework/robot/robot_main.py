@@ -4,15 +4,12 @@
 机器狗端入口：同时启动视频流 server 和控制命令 server
 """
 
-import os
-import sys
 import threading
 import time
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from video_server import start_video_server
-from cmd_server import start_cmd_server
-from utils import log_info
+from tcp_framework.robot.cmd_server import start_cmd_server
+from tcp_framework.robot.utils import log_info
+from tcp_framework.robot.video_server import start_video_server
 
 
 if __name__ == "__main__":

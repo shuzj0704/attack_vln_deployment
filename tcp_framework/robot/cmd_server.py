@@ -6,14 +6,11 @@
 返回格式: "OK: ...\n" 或 "ERROR: ...\n"
 """
 
-import os
 import socket
-import sys
 import threading
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import ROBOT_HOST, CMD_PORT
-from utils import log_info, log_error, execute_action
+from tcp_framework.config import CMD_PORT, ROBOT_HOST
+from tcp_framework.robot.utils import execute_action, log_error, log_info
 
 
 def handle_client(conn, addr, running):

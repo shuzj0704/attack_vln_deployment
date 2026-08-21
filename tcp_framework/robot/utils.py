@@ -4,14 +4,13 @@
 机器狗端工具函数
 """
 
-import os
-import subprocess
-import sys
 from datetime import datetime
 
-# 从父目录导入 config
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import ACTION_RUNNER, VALID_COMMANDS
+from http_framework.robot.action_executor import (
+    ActionExecutionError,
+    ActionRunnerExecutor,
+)
+from tcp_framework.config import ACTION_RUNNER, VALID_COMMANDS
 
 
 def log_info(msg):
@@ -35,21 +34,9 @@ def execute_action(cmd):
     if not validate_command(cmd):
         return False, f"Unknown command: {cmd}"
 
+    executor = ActionRunnerExecutor(ACTION_RUNNER)
     try:
-        result = subprocess.run(
-            [ACTION_RUNNER, cmd],
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
-        output = result.stdout.strip()
-        if result.returncode == 0:
-            return True, output
-        else:
-            return False, output + "\n" + result.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return False, "Action timeout"
-    except FileNotFoundError:
-        return False, f"action_runner not found: {ACTION_RUNNER}"
-    except Exception as e:
-        return False, str(e)
+        executor.execute(cmd)
+        return True, f"{cmd} completed and stopped"
+    except ActionExecutionError as exc:
+        return False, str(exc)

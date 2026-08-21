@@ -4,12 +4,10 @@
 主机端：发送单次控制命令给机器狗
 """
 
-import os
 import socket
 import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import ROBOT_IP, CMD_PORT, VALID_COMMANDS
+from tcp_framework.config import CMD_PORT, ROBOT_IP, VALID_COMMANDS
 
 
 def send_command(cmd, robot_ip=ROBOT_IP, port=CMD_PORT, timeout=10):

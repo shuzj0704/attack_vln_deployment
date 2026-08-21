@@ -1,30 +1,38 @@
-# Go2-W TCP 视频 + 控制框架
+# TCP Framework
 
-通过 TCP 在主机和机器狗之间传输 D435i 实时图像和控制命令。
+Go2-W TCP 视频 + 控制回退方案。PC 端通过 TCP 接收 D435i 实时图像并发送控制命令；项目默认优先使用 `http_framework/`，本目录作为备用。
+
+## 目录结构
+
+```text
+tcp_framework/
+├── config.py                       # IP、端口、相机参数
+├── host/                           # PC 端
+│   ├── cmd_client.py               # 单次命令发送
+│   ├── video_client.py             # 视频流接收显示
+│   └── keyboard_control.py         # 键盘控制实现
+├── robot/                          # Unitree 端
+│   ├── robot_main.py               # 机器狗端入口
+│   ├── cmd_server.py               # 控制命令服务
+│   ├── video_server.py             # D435i 视频流服务
+│   └── utils.py
+├── examples/                       # 推荐手工入口
+│   ├── view_d435i_rgb.py           # 查看 RGB
+│   ├── control_robot.py            # 发送单个动作
+│   └── keyboard_control.py         # 键盘控制
+└── tests/                          # 无硬件自动化测试
+```
 
 ## 架构
 
 ```text
-机器狗 (192.168.1.50)                           主机
-├── video_server.py :5000  ───────────────►    ├── video_client.py
-│   D435i JPEG 视频流                            │   显示实时画面
-│                                               │
-└── cmd_server.py   :6000  ◄───────────────    └── cmd_client.py / keyboard_control.py
-    接收并执行控制命令                            发送 forward/left/right/stop 命令
+机器狗 (192.168.1.50)                         PC 端
+├── video_server.py :5000  ───────────►    ├── video_client.py
+│   D435i JPEG 视频流                          │   显示实时画面
+│                                             │
+└── cmd_server.py   :6000  ◄───────────    ├── cmd_client.py
+    接收并执行控制命令                          └── control_robot.py / keyboard_control.py
 ```
-
-## 文件说明
-
-| 文件 | 说明 |
-|------|------|
-| `config.py` | 共享配置：IP、端口、相机参数 |
-| `robot/video_server.py` | 机器狗视频流 server |
-| `robot/cmd_server.py` | 机器狗控制命令 server |
-| `robot/robot_main.py` | 机器狗端入口 |
-| `host/video_client.py` | 主机视频接收显示 |
-| `host/cmd_client.py` | 主机发送单次命令 |
-| `host/keyboard_control.py` | 主机键盘实时控制 |
-| `host/host_main.py` | 主机端入口 |
 
 ## 启动步骤
 
@@ -32,43 +40,60 @@
 
 ```bash
 ssh unitree@192.168.1.50
-cd <robot_project_root>/tcp_framework
-python3 robot/robot_main.py
+cd /home/unitree/workspace/hkd/attack_vln_deployment
+python3 -m tcp_framework.robot.robot_main
 ```
 
-### 2. 主机端（键盘控制）
+### 2. PC 端查看 RGB
 
 ```bash
-cd <local_project_root>/tcp_framework
-python3 host/host_main.py
+python3 -m tcp_framework.examples.view_d435i_rgb
 ```
 
-键盘控制：
+按 `q` 退出。
+
+### 3. PC 端发送单个动作
+
+确认机器狗站稳、场地空旷、无台阶且遥控器急停可用；每次只发送一个动作：
+
+```bash
+# 只检查目标，不发送
+python3 -m tcp_framework.examples.control_robot forward --dry-run
+
+# 分别测试
+python3 -m tcp_framework.examples.control_robot stop
+python3 -m tcp_framework.examples.control_robot forward
+python3 -m tcp_framework.examples.control_robot left
+python3 -m tcp_framework.examples.control_robot right
+```
+
+`left` / `right` 映射为 `action_runner turn_left / turn_right`，每个 primitive 后自动 `stop`。
+
+### 4. PC 端键盘控制
+
+```bash
+python3 -m tcp_framework.examples.keyboard_control
+```
 
 | 按键 | 动作 |
-|------|------|
-| `W` | 前进约 25cm |
-| `A` | 左转约 22.5 度 |
-| `D` | 右转约 22.5 度 |
-| `空格` | 停止 |
+|---|---|
+| `W` | 前进约 25 cm |
+| `A` | 左转约 15° |
+| `D` | 右转约 15° |
+| 空格 | 停止 |
 | `Q` | 退出 |
 
-### 3. 主机端（仅发送单次命令）
+### 5. 底层入口（可选）
 
 ```bash
-python3 host/cmd_client.py forward
-python3 host/cmd_client.py stop
-```
-
-### 4. 主机端（仅查看视频）
-
-```bash
-python3 host/video_client.py
+python3 -m tcp_framework.host.cmd_client forward
+python3 -m tcp_framework.host.cmd_client stop
+python3 -m tcp_framework.host.video_client
 ```
 
 ## 配置修改
 
-编辑 `config.py`：
+编辑 `tcp_framework/config.py`：
 
 ```python
 ROBOT_IP = "192.168.1.50"    # 机器狗 WiFi IP
@@ -100,13 +125,20 @@ JPEG_QUALITY = 80             # JPEG 质量
 "OK: ...\n" 或 "ERROR: ...\n"
 ```
 
-## 支持的控制命令
+## 支持的命令
 
 | 命令 | 动作 |
-|------|------|
-| `forward` | 前进约 25cm |
-| `left` | 左转约 22.5 度 |
-| `right` | 右转约 22.5 度 |
+|---|---|
+| `forward` | 前进约 25 cm |
+| `left` | 左转约 15°（`turn_left`） |
+| `right` | 右转约 15°（`turn_right`） |
 | `stop` | 停止运动 |
 
-> 所有运动命令基于机器狗里程计做闭环控制，精度受地面打滑影响。
+`forward` / `left` / `right` 由共享的 `ActionRunnerExecutor` 执行，每个 primitive 后调用 `stop`。实际距离和角度会受地面打滑及底层控制状态影响。
+
+## 无硬件测试
+
+```bash
+python3 -m compileall -q tcp_framework
+python3 -m unittest discover -s tcp_framework/tests -v
+```

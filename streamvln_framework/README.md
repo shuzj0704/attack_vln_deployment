@@ -44,7 +44,7 @@ streamvln_framework/
 
 ## 核心行为
 
-- Robot 订阅 `/camera/camera/color/image_raw` 和 `/lf/sportmodestate`。
+- Robot 订阅 `/camera/color/image_raw` 和 `/lf/sportmodestate`。
 - GPU 接收 `POST /eval_vln`，每次请求执行默认 4 个 evaluator internal steps，返回 action sequence。
 - action ID：`0=stop`、`1=forward 0.25 m`、`2=left 15°`、`3=right 15°`。
 - action sequence 累加到持久的 `homo_goal`，以 10 Hz PD 发布 Unitree `SPORT_API_ID_MOVE=1008` 到 `/api/sport/request`。
@@ -101,19 +101,77 @@ curl -fsS http://127.0.0.1:5801/health
 
 ## 3. Robot 端准备与启动
 
-Robot 必须能导入 `rclpy`、`cv_bridge`、`sensor_msgs`、`unitree_api` 和 `unitree_go`。启动前确认 RealSense 与 Unitree topics：
+Robot 必须能导入 `rclpy`、`cv_bridge`、`sensor_msgs`、`unitree_api` 和 `unitree_go`。
+
+### 3.1 安装 RealSense SDK 与 ROS2 wrapper
+
+启动前先确认 RealSense RGB topic 是否已存在：
 
 ```bash
+source ~/unitree_ros2/setup.sh
 ros2 topic list | grep -E 'color/image_raw|sportmodestate'
-ros2 topic hz /camera/camera/color/image_raw
-ros2 topic hz /lf/sportmodestate
 ```
 
-若 RGB topic 不存在，启动 RealSense ROS2 包，例如：
+若已看到 `/camera/color/image_raw`（或类似名字），跳过本节直接到 3.2。
+
+否则在 Unitree 上编译安装：
 
 ```bash
+# 1. 依赖
+sudo apt-get update
+sudo apt-get install -y git cmake build-essential libusb-1.0-0-dev libssl-dev \
+  pkg-config libgtk-3-dev libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev \
+  python3-rosdep
+
+# 2. 下载 librealsense（v2.50.0 与 ros2-legacy wrapper 兼容）
+cd ~
+git clone --depth 1 --branch v2.50.0 https://github.com/IntelRealSense/librealsense.git
+
+# 3. 编译并安装
+mkdir -p ~/librealsense/build
+cd ~/librealsense/build
+cmake .. \
+  -DFORCE_RSUSB_BACKEND=true \
+  -DBUILD_WITH_CUDA=false \
+  -DBUILD_EXAMPLES=false \
+  -DBUILD_GRAPHICAL_EXAMPLES=false \
+  -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+sudo make install
+sudo ../scripts/setup_udev_rules.sh
+
+# 4. 下载并编译 realsense-ros wrapper
+mkdir -p ~/realsense_ws/src
+cd ~/realsense_ws/src
+git clone --depth 1 --branch ros2-legacy https://github.com/IntelRealSense/realsense-ros.git
+cd ~/realsense_ws
+source /opt/ros/foxy/setup.bash
+colcon build --packages-select realsense2_camera realsense2_camera_msgs
+```
+
+> 如果开发板有 CUDA 且需要 GPU 加速深度/点云处理，可将 `-DBUILD_WITH_CUDA=false` 改为 `true`，并确保 `nvcc` 在 PATH 中（Jetson 上通常为 `/usr/local/cuda/bin/nvcc`）。
+> 仅用于 RGB 时，关闭 CUDA 更简单可靠。
+
+### 3.2 启动 RealSense 并检查 topic
+
+```bash
+source /opt/ros/foxy/setup.bash
+source ~/realsense_ws/install/setup.bash
+source ~/unitree_ros2/setup.sh
+
 ros2 launch realsense2_camera rs_launch.py
 ```
+
+另一个终端检查：
+
+```bash
+ros2 topic list | grep color
+ros2 topic hz /camera/color/image_raw
+```
+
+> 注意：不同 wrapper 版本或 launch 参数下，RGB topic 可能是 `/camera/color/image_raw` 或 `/camera/camera/color_image_raw`。启动 service 时通过 `--rgb-topic` 对齐实际 topic。
+
+### 3.3 启动 streamvln service / client
 
 确认机器人站稳、周围无障碍和台阶、遥控器急停可用后，先验证本机 StopMove：
 
@@ -126,7 +184,7 @@ ros2 launch realsense2_camera rs_launch.py
 ```bash
 python3 -m streamvln_framework.robot.client \
   --server-url http://<gpu_server_ip>:5801 \
-  --rgb-topic /camera/camera/color/image_raw \
+  --rgb-topic /camera/color/image_raw \
   --odometry-topic /lf/sportmodestate \
   --request-topic /api/sport/request \
   --action-runner /home/unitree/unitree_sdk2/build/bin/action_runner
@@ -246,18 +304,7 @@ python3 -m streamvln_framework.examples.test_actions --yes
 | `right`   | yaw 减少`15°`  | 原地右转                 |
 | `stop`    | 零速度 + StopMove | 不产生新目标             |
 
-### 4.5 （可选）获取单帧 RGB
-
-**电脑**：Host（本机）
-**路径**：`/home/shu22/navigation/indoor_vln/attack_vln_deployment`
-
-```bash
-python3 -m streamvln_framework.examples.fetch_robot_rgb \
-  --server-url "http://$ROBOT_IP:5803" \
-  --output robot_rgb.jpg
-```
-
-### 4.6 停止 service
+### 4.5 停止 service
 
 **电脑**：Unitree 或 Host 均可
 
@@ -269,7 +316,78 @@ python3 -m streamvln_framework.examples.fetch_robot_rgb \
   python3 -m streamvln_framework.examples.control_robot stop
   ```
 
-## 5. 与 `http_framework` 的边界
+## 5. RGB 通信测试
+
+本节验证 Unitree 能通过 RealSense 发布 RGB，Host 能通过 HTTP 获取单帧图像。
+
+> 前提：RealSense 驱动与 ROS2 wrapper 已按 [3.1 节](#31-安装-realsense-sdk-与-ros2-wrapper) 安装并编译好。
+
+### 5.1 启动 RealSense 与 service
+
+**电脑**：Unitree（`ssh unitree@192.168.1.50`）
+
+终端 1：启动 RealSense
+
+```bash
+source /opt/ros/foxy/setup.bash
+source ~/realsense_ws/install/setup.bash
+source ~/unitree_ros2/setup.sh
+ros2 launch realsense2_camera rs_launch.py
+```
+
+终端 2：启动 streamvln service
+
+```bash
+source ~/unitree_ros2/setup.sh
+cd /home/unitree/workspace/hkd/attack_vln_deployment
+
+python3 -m streamvln_framework.robot.service \
+  --host 0.0.0.0 \
+  --port 5803 \
+  --rgb-topic /camera/color/image_raw
+```
+
+> 不同 wrapper 版本或 launch 参数下，RGB topic 可能是 `/camera/color/image_raw` 或 `/camera/camera/color_image_raw`。启动 service 时通过 `--rgb-topic` 对齐实际 topic。
+
+### 5.2 检查 service 状态
+
+**电脑**：Host（本机）
+**路径**：任意
+
+```bash
+ROBOT_IP=192.168.1.50
+curl -fsS "http://$ROBOT_IP:5803/health"
+```
+
+期望返回：
+
+- `status=ready`
+- `rgb_received=true`
+
+### 5.3 获取单帧 RGB
+
+**电脑**：Host（本机）
+**路径**：`/home/shu22/navigation/indoor_vln/attack_vln_deployment`
+
+```bash
+cd /home/shu22/navigation/indoor_vln/attack_vln_deployment
+python3 -m streamvln_framework.examples.fetch_robot_rgb \
+  --server-url "http://$ROBOT_IP:5803" \
+  --output robot_rgb.jpg
+```
+
+成功后当前目录出现 `robot_rgb.jpg`，图像内容正确即说明 RGB 通信链路通。
+
+### 5.4 停止
+
+- 在 Unitree 的 RealSense / service 终端按 `Ctrl+C`；或
+- 在 Host 上先发一次 `stop`：
+
+  ```bash
+  python3 -m streamvln_framework.examples.control_robot stop
+  ```
+
+## 6. 与 `http_framework` 的边界
 
 - 复现/继续使用 StreamVLN 原版 evaluator、action sequence 和累计目标控制：使用本目录。
 - 接入你自己的 VLN，仅需实现 backend 接口：使用 `http_framework/`。

@@ -3,11 +3,21 @@ from unittest import mock
 
 import requests
 
-from http_framework.robot.action_executor import ActionRunnerExecutor
+from http_framework.robot.action_executor import (
+    ActionExecutionError,
+    ActionRunnerExecutor,
+    parse_args,
+)
 from http_framework.robot.client import (
     HTTPProtocolError,
     NavigationLoop,
     VLNHTTPClient,
+)
+from http_framework.robot.pd_executor import (
+    OdometryState,
+    PoseTarget,
+    StreamVLNPDController,
+    StreamVLNPDExecutor,
 )
 
 
@@ -170,6 +180,121 @@ class ActionRunnerExecutorTest(unittest.TestCase):
         self.assertEqual("turn_left", movement_commands[1][1])
         self.assertAlmostEqual(1.047198, float(movement_commands[1][2]), places=5)
         self.assertEqual("turn_right", movement_commands[2][1])
+
+    def test_streamvln_pd_is_default_and_action_runner_is_available(self):
+        default_args = parse_args(["--action", "stop", "--execute"])
+        fallback_args = parse_args(
+            ["--action", "stop", "--execute", "--executor", "action-runner"]
+        )
+        self.assertEqual("streamvln-pd", default_args.executor)
+        self.assertEqual("action-runner", fallback_args.executor)
+
+
+class FakeSportMotionIO:
+    def __init__(self, states):
+        self.states = list(states)
+        self.moves = []
+        self.closed = False
+
+    def read_odometry(self, _timeout_s):
+        if not self.states:
+            raise RuntimeError("no fake odometry")
+        return self.states.pop(0)
+
+    def move(self, vx, vy, vyaw):
+        self.moves.append((vx, vy, vyaw))
+
+    def close(self):
+        self.closed = True
+
+
+class FakeStopExecutor:
+    def __init__(self):
+        self.stops = 0
+        self.closed = False
+
+    def execute(self, _action):
+        raise AssertionError("PD executor should only use the fallback StopMove")
+
+    def stop(self):
+        self.stops += 1
+
+    def close(self):
+        self.closed = True
+
+
+class StreamVLNPDExecutorTest(unittest.TestCase):
+    def test_pd_law_matches_streamvln_parameters(self):
+        controller = StreamVLNPDController()
+        vx, vyaw, position_error, yaw_error = controller.solve(
+            OdometryState(0.0, 0.0, 0.0, 0.2, 0.1),
+            PoseTarget(0.25, 0.0, 0.2),
+        )
+        self.assertAlmostEqual(0.65, vx)
+        self.assertAlmostEqual(0.55, vyaw)
+        self.assertAlmostEqual(0.25, position_error)
+        self.assertAlmostEqual(0.2, yaw_error)
+
+    @mock.patch("http_framework.robot.pd_executor.time.sleep", return_value=None)
+    def test_forward_uses_odometry_feedback_then_stopmove(self, _sleep):
+        motion = FakeSportMotionIO(
+            [
+                OdometryState(0.0, 0.0, 0.0, 0.0, 0.0),
+                OdometryState(0.05, 0.0, 0.0, 0.1, 0.0),
+                OdometryState(0.16, 0.0, 0.0, 0.1, 0.0),
+            ]
+        )
+        stop_executor = FakeStopExecutor()
+        executor = StreamVLNPDExecutor(motion, stop_executor)
+
+        executor.execute("forward")
+
+        self.assertGreater(motion.moves[0][0], 0.0)
+        self.assertEqual((0.0, 0.0, 0.0), motion.moves[-1])
+        self.assertEqual(1, stop_executor.stops)
+
+    @mock.patch("http_framework.robot.pd_executor.time.sleep", return_value=None)
+    def test_left_uses_positive_yaw_feedback(self, _sleep):
+        motion = FakeSportMotionIO(
+            [
+                OdometryState(0.0, 0.0, 0.0, 0.0, 0.0),
+                OdometryState(0.0, 0.0, 0.10, 0.0, 0.0),
+                OdometryState(0.0, 0.0, 0.18, 0.0, 0.0),
+            ]
+        )
+        executor = StreamVLNPDExecutor(motion, FakeStopExecutor())
+
+        executor.execute("left")
+
+        self.assertGreater(motion.moves[0][2], 0.0)
+        self.assertEqual((0.0, 0.0, 0.0), motion.moves[-1])
+
+    @mock.patch("http_framework.robot.pd_executor.time.sleep", return_value=None)
+    def test_right_uses_negative_yaw_feedback(self, _sleep):
+        motion = FakeSportMotionIO(
+            [
+                OdometryState(0.0, 0.0, 0.0, 0.0, 0.0),
+                OdometryState(0.0, 0.0, -0.10, 0.0, 0.0),
+                OdometryState(0.0, 0.0, -0.18, 0.0, 0.0),
+            ]
+        )
+        executor = StreamVLNPDExecutor(motion, FakeStopExecutor())
+
+        executor.execute("right")
+
+        self.assertLess(motion.moves[0][2], 0.0)
+        self.assertEqual((0.0, 0.0, 0.0), motion.moves[-1])
+
+    def test_odometry_failure_triggers_stopmove(self):
+        motion = FakeSportMotionIO([])
+        stop_executor = FakeStopExecutor()
+        executor = StreamVLNPDExecutor(motion, stop_executor)
+
+        with self.assertRaisesRegex(ActionExecutionError, "no fake odometry"):
+            executor.execute("forward")
+
+        self.assertEqual([(0.0, 0.0, 0.0)], motion.moves)
+        self.assertEqual(1, stop_executor.stops)
 
 
 if __name__ == "__main__":

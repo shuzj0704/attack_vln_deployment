@@ -5,19 +5,23 @@
 发送格式: [4字节长度(大端)] + [JPEG数据]
 """
 
-import os
 import socket
 import struct
-import sys
 import threading
 import time
 
 import cv2
 import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import ROBOT_HOST, VIDEO_PORT, WIDTH, HEIGHT, FPS, JPEG_QUALITY
-from utils import log_info, log_error
+from tcp_framework.config import (
+    FPS,
+    HEIGHT,
+    JPEG_QUALITY,
+    ROBOT_HOST,
+    VIDEO_PORT,
+    WIDTH,
+)
+from tcp_framework.robot.utils import log_error, log_info
 
 
 def encode_frame_to_jpeg(frame):

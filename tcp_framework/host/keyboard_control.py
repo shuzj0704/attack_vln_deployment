@@ -4,19 +4,16 @@
 主机端：键盘实时控制机器狗 + 显示视频流
 """
 
-import os
 import socket
 import struct
-import sys
 import threading
 import time
 
 import cv2
 import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import ROBOT_IP, VIDEO_PORT, CMD_PORT
-from cmd_client import send_command
+from tcp_framework.config import CMD_PORT, ROBOT_IP, VIDEO_PORT
+from tcp_framework.host.cmd_client import send_command
 
 
 class VideoReceiver:
@@ -94,8 +91,8 @@ def run_keyboard_control():
     print("[INFO] Starting keyboard control...")
     print("Controls:")
     print("  w: forward (about 25cm)")
-    print("  a: left (about 22.5 degrees)")
-    print("  d: right (about 22.5 degrees)")
+    print("  a: turn left (about 15 degrees)")
+    print("  d: turn right (about 15 degrees)")
     print("  space: stop")
     print("  q: quit")
 

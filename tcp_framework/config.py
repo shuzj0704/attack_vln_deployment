@@ -28,7 +28,7 @@ ACTION_RUNNER = "/home/unitree/unitree_sdk2/build/bin/action_runner"
 
 # 合法控制命令
 # forward: 前进约 25cm
-# left:    左转约 22.5 度
-# right:   右转约 22.5 度
+# left:    左转约 15 度
+# right:   右转约 15 度
 # stop:    停止运动
 VALID_COMMANDS = ["forward", "left", "right", "stop"]

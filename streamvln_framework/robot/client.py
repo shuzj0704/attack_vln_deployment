@@ -327,7 +327,7 @@ def parse_args() -> argparse.Namespace:
         "--action-runner",
         default="/home/unitree/unitree_sdk2/build/bin/action_runner",
     )
-    parser.add_argument("--rgb-topic", default="/camera/camera/color/image_raw")
+    parser.add_argument("--rgb-topic", default="/camera/color/image_raw")
     parser.add_argument("--odometry-topic", default="/lf/sportmodestate")
     parser.add_argument("--request-topic", default="/api/sport/request")
     parser.add_argument("--http-timeout", type=float, default=150.0)

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import abc
+import argparse
 import math
+import os
 import subprocess
+import sys
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Optional, Sequence
 
 from http_framework.protocol import VALID_ACTIONS
 
@@ -25,6 +28,12 @@ class ActionExecutor(abc.ABC):
     @abc.abstractmethod
     def stop(self) -> None:
         """Issue a local StopMove command."""
+
+    def close(self) -> None:
+        """Release executor resources; stateless executors need no cleanup."""
+
+
+EXECUTOR_CHOICES = ("streamvln-pd", "action-runner")
 
 
 @dataclass(frozen=True)
@@ -134,3 +143,122 @@ class ActionRunnerExecutor(ActionExecutor):
             raise ActionExecutionError(
                 f"action_runner exited with {result.returncode}: {detail}"
             )
+
+
+def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+    return os.environ.get(name, default)
+
+
+def add_executor_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--executor",
+        choices=EXECUTOR_CHOICES,
+        default=_env("UNITREE_ACTION_EXECUTOR", "streamvln-pd"),
+        help="motion executor (default: StreamVLN-style odometry PD)",
+    )
+    parser.add_argument(
+        "--action-runner",
+        default=_env("UNITREE_ACTION_RUNNER", "action_runner"),
+        help="used for the fallback executor and PD StopMove",
+    )
+    parser.add_argument(
+        "--forward-speed",
+        type=float,
+        default=float(_env("UNITREE_FORWARD_SPEED", "0.25")),
+        help="action-runner fallback speed in m/s",
+    )
+    parser.add_argument(
+        "--turn-speed-deg",
+        type=float,
+        default=float(_env("UNITREE_TURN_SPEED_DEG", "15")),
+        help="action-runner fallback yaw speed in degrees/s",
+    )
+    parser.add_argument("--pd-kp-translation", type=float, default=3.0)
+    parser.add_argument("--pd-kd-translation", type=float, default=0.5)
+    parser.add_argument("--pd-kp-yaw", type=float, default=3.0)
+    parser.add_argument("--pd-kd-yaw", type=float, default=0.5)
+    parser.add_argument("--pd-max-linear-velocity", type=float, default=1.0)
+    parser.add_argument("--pd-max-yaw-rate", type=float, default=1.2)
+    parser.add_argument("--pd-position-tolerance", type=float, default=0.1)
+    parser.add_argument("--pd-yaw-tolerance", type=float, default=0.1)
+    parser.add_argument("--pd-control-rate", type=float, default=10.0)
+    parser.add_argument("--pd-odometry-timeout", type=float, default=2.0)
+    parser.add_argument("--pd-action-timeout", type=float, default=10.0)
+    parser.add_argument("--sport-state-topic", default="/lf/sportmodestate")
+    parser.add_argument("--sport-request-topic", default="/api/sport/request")
+
+
+def create_executor(args: argparse.Namespace) -> ActionExecutor:
+    stop_executor = ActionRunnerExecutor(
+        args.action_runner,
+        forward_speed_mps=args.forward_speed,
+        turn_speed_radps=math.radians(args.turn_speed_deg),
+    )
+    if args.executor == "action-runner":
+        return stop_executor
+
+    from http_framework.robot.pd_executor import (
+        ROS2SportMotionIO,
+        StreamVLNPDController,
+        StreamVLNPDExecutor,
+    )
+
+    motion_io = ROS2SportMotionIO(
+        state_topic=args.sport_state_topic,
+        request_topic=args.sport_request_topic,
+    )
+    controller = StreamVLNPDController(
+        kp_translation=args.pd_kp_translation,
+        kd_translation=args.pd_kd_translation,
+        kp_yaw=args.pd_kp_yaw,
+        kd_yaw=args.pd_kd_yaw,
+        max_linear_velocity=args.pd_max_linear_velocity,
+        max_yaw_rate=args.pd_max_yaw_rate,
+    )
+    return StreamVLNPDExecutor(
+        motion_io,
+        stop_executor,
+        controller=controller,
+        position_tolerance_m=args.pd_position_tolerance,
+        yaw_tolerance_rad=args.pd_yaw_tolerance,
+        control_rate_hz=args.pd_control_rate,
+        odometry_timeout_s=args.pd_odometry_timeout,
+        action_timeout_s=args.pd_action_timeout,
+    )
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Execute one HTTP-framework primitive on the local robot."
+    )
+    parser.add_argument("--action", choices=VALID_ACTIONS, required=True)
+    add_executor_arguments(parser)
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="required safety acknowledgement for actual robot execution",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
+    if not args.execute:
+        print("refusing to move without --execute", file=sys.stderr)
+        return 2
+
+    executor = create_executor(args)
+    try:
+        executor.execute(args.action)
+    except ActionExecutionError as exc:
+        print(f"action failed: {exc}", file=sys.stderr)
+        return 1
+    else:
+        print(f"action completed and stopped: {args.action}", flush=True)
+        return 0
+    finally:
+        executor.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

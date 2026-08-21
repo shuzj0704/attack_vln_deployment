@@ -1,28 +1,45 @@
-# 自定义 VLN 无 ROS 真机 HTTP 部署
+# HTTP Framework
 
-本目录提供模型无关的 `receding_horizon_single_step` 部署框架。GPU server 负责调用
-用户提供的 VLN backend；D435i 图像采集、primitive motion、稳定等待和安全停止在
-Unitree Go2-W 本地完成。仓库不包含具体 VLN 模型、checkpoint 加载或推理逻辑。
+模型无关的 VLN 真机 HTTP 部署框架。GPU server 负责推理，Robot 端负责 D435i 采集、primitive 执行和安全停止。仓库不包含具体 VLN 模型、checkpoint 或推理逻辑。
+
+## 目录结构
+
+```text
+http_framework/
+├── host/                  # GPU/Host inference server
+│   ├── server.py          # HTTP server
+│   └── vln_backend.py     # backend 接口模板
+├── robot/                 # Robot client / diagnostic service
+│   ├── client.py          # 闭环 VLN client
+│   ├── service.py         # RGB / 单动作 diagnostic service
+│   ├── pd_executor.py     # StreamVLN 风格 PD executor
+│   └── action_executor.py # action_runner fallback
+├── examples/              # 手工真机入口
+│   ├── smoke_backend.py   # 通信测试 backend
+│   ├── view_d435i_rgb.py  # 查看 RGB
+│   └── control_robot.py   # 发送单个动作
+├── tests/                 # 无硬件自动化测试
+└── protocol.py            # Host/Robot 共用协议
+```
 
 ## 部署分工
 
-| 机器 | 必需代码/资源 | 启动入口 | 不需要的资源 |
-|---|---|---|---|
-| GPU 服务器 | `http_framework/`、用户 VLN 代码和 checkpoint | `http_framework.server` | D435i、Unitree SDK2 |
-| Unitree Go2-W | `http_framework/`、`action_runner`、D435i runtime | `http_framework.robot.client` | VLN 代码、checkpoint、CUDA 环境 |
+| 位置 | 启动入口 | 必需资源 |
+|---|---|---|
+| GPU 服务器 | `python3 -m http_framework.host.server` | `http_framework/`、用户 VLN 代码与 checkpoint |
+| Unitree Go2-W | `python3 -m http_framework.robot.client` | `http_framework/`、ROS2 Unitree messages、`action_runner`、D435i |
 
-Robot 入口只导入通用协议和 `robot/` 模块，不会加载用户模型。可以从仓库根目录同步：
+同步代码到 Robot：
 
 ```bash
 rsync -av --exclude '__pycache__' \
   http_framework/ \
-  <robot_user>@<robot_host>:<robot_project_root>/http_framework/
+  unitree@192.168.1.50:/home/unitree/workspace/hkd/attack_vln_deployment/http_framework/
 ```
 
-## VLN backend 接口
+## Backend 接口
 
-接口定义在 `http_framework.protocol.InferenceBackend`，默认实现模板位于
-`http_framework/vln_backend.py`：
+接口定义在 `http_framework.protocol.InferenceBackend`，默认模板在 `http_framework/host/vln_backend.py`：
 
 ```python
 class InferenceBackend(Protocol):
@@ -31,79 +48,37 @@ class InferenceBackend(Protocol):
     def close(self) -> None: ...
 ```
 
-- `reset()`：开始新 episode，并清空模型的 temporal/memory state。
-- `step()`：接收当前 JPEG bytes 和 instruction，执行一次推理。
-- `close()`：清理 episode state；模型权重可以继续驻留显存。
-- `BackendOutput`：一个 action，或 action sequence。支持字符串 `forward`、`left`、
-  `right`、`stop`；也支持框架 ID `1`、`2`、`3`、`0`。
+- `reset()`：开始新 episode，清空 temporal/memory state。
+- `step()`：接收当前 JPEG 和 instruction，返回一个 action。
+- `close()`：清理 episode state。
+- `BackendOutput`：字符串 `forward` / `left` / `right` / `stop`，或框架 ID `1` / `2` / `3` / `0`。
 
-框架只执行第一个合法 action，然后请求一张新图像。空输出或完全非法的输出会安全地
-归一化为 `stop`。模型若使用其他 action space，请在 backend 内完成映射。
+框架只执行第一个合法 action；非法输出安全归一化为 `stop`。自定义 action space 请在 backend 内完成映射。 factory 必须是无参数 callable。
 
-最直接的接入方式是编辑 `http_framework/vln_backend.py`，在 `VLNBackend.__init__()`
-加载模型，并实现三个方法。也可以把模型适配器放在自己的 Python package 中：
+## 动作语义
 
-```python
-# my_vln/deployment.py
-import os
-
-
-class MyVLNBackend:
-    def __init__(self):
-        checkpoint = os.environ["MY_VLN_CHECKPOINT"]
-        # Load the model once here.
-
-    def reset(self, instruction):
-        # Reset model memory here.
-        pass
-
-    def step(self, jpeg_bytes, instruction):
-        # Decode/preprocess jpeg_bytes, run inference, and map the output.
-        return "stop"
-
-    def close(self):
-        # Clear episode state here.
-        pass
-
-
-def create_backend():
-    return MyVLNBackend()
-```
-
-Factory 必须是无参数 callable，返回具有 `reset`、`step`、`close` 方法的对象。模型路径、
-device 和自定义超参数由 factory 自己通过环境变量或项目配置读取，HTTP 框架不绑定模型配置。
-
-## 闭环与动作语义
-
-```text
-robot StopMove -> settle -> capture one RGB JPEG
-     -> POST /step -> receive exactly one action
-     -> execute primitive -> StopMove -> repeat with a fresh image
-```
-
-| action | framework id | 本地 primitive |
-|---|---:|---|
-| `forward` | 1 | 前进，默认 `0.25 m` |
-| `left` | 2 | 左转，默认 `+15°` (`turn_left`) |
-| `right` | 3 | 右转，默认 `-15°` (`turn_right`) |
+| action | ID | primitive |
+|---:|---:|---|
+| `forward` | 1 | 前进，默认目标 `0.25 m` |
+| `left` | 2 | 左转，默认目标 yaw `+15°` |
+| `right` | 3 | 右转，默认目标 yaw `-15°` |
 | `stop` | 0 | `StopMove` 并结束 episode |
 
-## HTTP protocol
+执行流程：
 
-所有成功和错误响应都是 JSON。`step_id` 从 `0` 开始且必须严格递增。
+```text
+StopMove -> settle -> capture JPEG -> POST /step -> execute action -> StopMove -> repeat
+```
+
+## HTTP 协议
+
+所有响应均为 JSON。`step_id` 从 `0` 开始严格递增。
 
 - `GET /health`
-- `POST /reset`，JSON：
+- `POST /reset`：`{"instruction": "...", "request_id": "uuid"}`，返回 `episode_id` 和 `next_step_id: 0`。
+- `POST /step`：`multipart/form-data` 包含 `episode_id`、`step_id`、`request_id` 和 JPEG `image`。
 
-  ```json
-  {"instruction": "Walk out of the room.", "request_id": "uuid"}
-  ```
-
-  返回 `episode_id` 和 `next_step_id: 0`。相同 `request_id`、相同 instruction 的重试
-  不会再次 reset backend。
-
-- `POST /step`，`multipart/form-data`：`episode_id`、`step_id`、`request_id` 和 JPEG
-  field `image`。返回：
+  返回示例：
 
   ```json
   {
@@ -115,70 +90,159 @@ robot StopMove -> settle -> capture one RGB JPEG
   }
   ```
 
-  Server 按 `(episode_id, step_id)` 缓存 action 和 JPEG SHA-256。相同步骤、相同图像的
-  网络重试直接返回缓存结果；相同步骤但图像不同、复用 `request_id` 或跳号均返回
-  HTTP 409。
+  相同 `(episode_id, step_id)` 与图像 SHA-256 命中缓存时直接返回旧结果；跳号、复用 `request_id` 或图像不同返回 HTTP 409。
 
-- `POST /close`，JSON：`episode_id`、`request_id`。用于 best-effort backend 清理；
-  机器人运动停止不依赖它，本地 `StopMove` 始终优先。
-
-一个 server 实例串行调用一个 backend，同一时刻只有一个 active episode。新的
-`/reset` 会替换旧 episode。
+- `POST /close`：`{"episode_id": "...", "request_id": "uuid"}`，best-effort 清理 backend。
 
 ## 启动 GPU server
 
-先实现 backend，然后从仓库根目录运行：
+使用自定义 backend：
 
 ```bash
 export MY_VLN_CHECKPOINT=/path/to/checkpoint
-python3 -m http_framework.server \
+python3 -m http_framework.host.server \
   --backend-factory my_vln.deployment:create_backend \
   --host 0.0.0.0 \
   --port 5801
 ```
 
-如果直接实现默认模板，可省略 `--backend-factory`：
+直接修改默认模板时可省略 `--backend-factory`：
 
 ```bash
-python3 -m http_framework.server --host 0.0.0.0 --port 5801
+python3 -m http_framework.host.server --host 0.0.0.0 --port 5801
 ```
 
-默认模板在未实现时会明确抛出 `NotImplementedError`，不会伪装成可用服务。通用环境变量为
-`VLN_BACKEND_FACTORY`、`VLN_HTTP_HOST`、`VLN_HTTP_PORT` 和 `VLN_MAX_IMAGE_BYTES`。
+通用环境变量：`VLN_BACKEND_FACTORY`、`VLN_HTTP_HOST`、`VLN_HTTP_PORT`、`VLN_MAX_IMAGE_BYTES`。
 
-## 启动 Go2-W robot client
+## 启动 Robot client
 
-Robot 侧需要 `requests`、`pyrealsense2`、NumPy 和 OpenCV。`action_runner` 应支持：
-
-```text
-action_runner forward <duration_s> <speed_mps>
-action_runner turn_left <duration_s> <speed_radps>
-action_runner turn_right <duration_s> <speed_radps>
-action_runner stop
-```
-
-启动示例：
+默认 motion executor 为 `streamvln-pd`，需要 ROS2 `rclpy`、`unitree_api.msg`、`unitree_go.msg`，并保证 `/sportmodestate` 与 `/api/sport/request` 可用。每个动作结束和异常时都会调用 `action_runner stop`。
 
 ```bash
 python3 -m http_framework.robot.client \
-  --server-url http://GPU_HOST:5801 \
+  --server-url http://<gpu_host>:5801 \
   --instruction "Walk out of the room and stop." \
-  --camera-width 640 \
-  --camera-height 480 \
-  --action-runner /path/to/unitree_sdk2/action_runner
+  --action-runner /home/unitree/unitree_sdk2/build/bin/action_runner
 ```
 
-也可使用 `--instruction-file`。常用环境变量为 `VLN_SERVER_URL`、
-`VLN_CONNECT_TIMEOUT`、`VLN_READ_TIMEOUT`、`VLN_SETTLE_TIME`、`VLN_CAMERA_WIDTH`、
-`VLN_CAMERA_HEIGHT` 和 `UNITREE_ACTION_RUNNER`。完整参数见两个入口的 `--help`。
+如需切回定时 `action_runner` 实现：
 
-`ActionExecutor` 也是可替换接口。当前 `ActionRunnerExecutor` 根据距离/角度和速度计算
-动作时长，每次动作后调用 `action_runner stop`。若已有 runner 的 CLI 或控制方式不同，
-新增另一个 `ActionExecutor`，不要改变 HTTP protocol。
+```bash
+--executor action-runner
+```
 
-任何网络超时、非 JSON/非法 action、顺序错误、相机异常或动作异常都会触发机器人本地
-best-effort `StopMove`。真机仍需保留遥控器急停，并先在空旷平地低速验证距离、转角符号
-和停止行为。
+PD 参数可通过 `--pd-*` 系列参数覆盖；首次真机建议先用 `--pd-max-linear-velocity` / `--pd-max-yaw-rate` 降低速度上限。
+
+## HTTP 通信 smoke test
+
+使用 `http_framework.examples.smoke_backend` 区分 HTTP 链路与推理问题。
+
+### 1. 启动安全 backend
+
+```bash
+python3 -m http_framework.host.server \
+  --backend-factory http_framework.examples.smoke_backend:create_backend \
+  --host 0.0.0.0 \
+  --port 5801
+```
+
+本机检查：
+
+```bash
+curl -fsS http://127.0.0.1:5801/health
+```
+
+### 2. Robot 侧验证端口与协议
+
+```bash
+GPU_SERVER_IP=192.168.1.X
+
+ping -c 3 "$GPU_SERVER_IP"
+nc -zv "$GPU_SERVER_IP" 5801
+curl -fsS "http://$GPU_SERVER_IP:5801/health"
+```
+
+测试 `/reset`、`/step`、`/close`：
+
+```bash
+RESET_REQUEST_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+STEP_REQUEST_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+CLOSE_REQUEST_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+
+RESET_RESPONSE=$(curl -fsS -X POST \
+  "http://$GPU_SERVER_IP:5801/reset" \
+  -H 'Content-Type: application/json' \
+  -d "{\"instruction\":\"communication smoke test\",\"request_id\":\"$RESET_REQUEST_ID\"}")
+echo "$RESET_RESPONSE"
+
+EPISODE_ID=$(printf '%s' "$RESET_RESPONSE" | \
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["episode_id"])')
+
+curl -fsS -X POST "http://$GPU_SERVER_IP:5801/step" \
+  -F "episode_id=$EPISODE_ID" \
+  -F 'step_id=0' \
+  -F "request_id=$STEP_REQUEST_ID" \
+  -F 'image=@/etc/hostname;filename=smoke.jpg;type=image/jpeg'
+
+curl -fsS -X POST "http://$GPU_SERVER_IP:5801/close" \
+  -H 'Content-Type: application/json' \
+  -d "{\"episode_id\":\"$EPISODE_ID\",\"request_id\":\"$CLOSE_REQUEST_ID\"}"
+```
+
+通过标志：
+
+- `/health` 返回 `status: ready`。
+- `/reset` 返回 `episode_id` 和 `next_step_id: 0`。
+- `/step` 返回 `action: stop`，server 日志 HTTP 200。
+- `/close` 返回 `closed: true`。
+
+### 3. D435i + client 完整链路
+
+确认 `action_runner stop` 有效后：
+
+```bash
+python3 -m http_framework.robot.client \
+  --server-url "http://$GPU_SERVER_IP:5801" \
+  --instruction "communication smoke test" \
+  --action-runner /home/unitree/unitree_sdk2/build/bin/action_runner \
+  --max-steps 1
+```
+
+预期输出包含 `step_id=0 action=stop` 和 `episode completed`。
+
+## Robot diagnostic service 与 examples
+
+`http_framework.robot.service` 提供独立的 RGB 与单动作检查，默认监听 `5802`。D435i 同一时刻只能被一个进程占用，启动前请停止 `robot.client` 或 TCP video server。
+
+启动 service：
+
+```bash
+python3 -m http_framework.robot.service \
+  --host 0.0.0.0 \
+  --port 5802 \
+  --action-runner /home/unitree/unitree_sdk2/build/bin/action_runner
+```
+
+Host 端示例：
+
+```bash
+# 检查 health
+curl -fsS http://192.168.1.50:5802/health
+
+# 查看 RGB
+python3 -m http_framework.examples.view_d435i_rgb \
+  --server-url http://192.168.1.50:5802
+
+# 发送单个动作（先 --dry-run 检查）
+python3 -m http_framework.examples.control_robot forward \
+  --server-url http://192.168.1.50:5802 --dry-run
+python3 -m http_framework.examples.control_robot stop \
+  --server-url http://192.168.1.50:5802
+python3 -m http_framework.examples.control_robot forward \
+  --server-url http://192.168.1.50:5802
+```
+
+移动前请确认机器狗站稳、周围空旷、无台阶且遥控器急停可用；每次只发送一个动作，等待完全停止后再继续。`left` / `right` 为原地转向，不是横移。
 
 ## 无硬件测试
 
@@ -187,4 +251,4 @@ python3 -m compileall -q http_framework
 python3 -m unittest discover -s http_framework/tests -v
 ```
 
-测试只使用 fake backend/session/camera/executor，不加载 checkpoint，也不访问相机或机器人。
+测试使用 fake backend / camera / executor，不加载 checkpoint、不访问真机。

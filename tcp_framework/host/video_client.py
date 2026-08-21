@@ -4,17 +4,14 @@
 主机端：接收机器狗视频流并显示
 """
 
-import os
 import socket
 import struct
-import sys
 import time
 
 import cv2
 import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import ROBOT_IP, VIDEO_PORT, WIDTH, HEIGHT
+from tcp_framework.config import ROBOT_IP, VIDEO_PORT
 
 
 def recv_all(sock, n):

@@ -277,7 +277,7 @@ def run_preflight(args: argparse.Namespace) -> List[CheckResult]:
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rgb-topic", default="/camera/camera/color/image_raw")
+    parser.add_argument("--rgb-topic", default="/camera/color/image_raw")
     parser.add_argument("--odometry-topic", default="/lf/sportmodestate")
     parser.add_argument(
         "--action-runner",

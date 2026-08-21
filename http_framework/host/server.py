@@ -106,7 +106,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=int(_env("VLN_HTTP_PORT", "5801")))
     parser.add_argument(
         "--backend-factory",
-        default=_env("VLN_BACKEND_FACTORY", "http_framework.vln_backend:create_backend"),
+        default=_env(
+            "VLN_BACKEND_FACTORY",
+            "http_framework.host.vln_backend:create_backend",
+        ),
         help="zero-argument backend factory in module:callable format",
     )
     parser.add_argument(

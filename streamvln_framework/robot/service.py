@@ -477,7 +477,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=5803)
-    parser.add_argument("--rgb-topic", default="/camera/camera/color/image_raw")
+    parser.add_argument("--rgb-topic", default="/camera/color/image_raw")
     parser.add_argument("--odometry-topic", default="/lf/sportmodestate")
     parser.add_argument("--request-topic", default="/api/sport/request")
     parser.add_argument(

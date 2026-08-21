@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import time
 import uuid
@@ -13,7 +12,11 @@ from typing import Any, Dict, Optional, Tuple
 import requests
 
 from http_framework.protocol import VALID_ACTIONS
-from http_framework.robot.action_executor import ActionExecutor, ActionRunnerExecutor
+from http_framework.robot.action_executor import (
+    ActionExecutor,
+    add_executor_arguments,
+    create_executor,
+)
 from http_framework.robot.camera import RealSenseCamera
 
 
@@ -203,7 +206,7 @@ def parse_args() -> argparse.Namespace:
     instruction_group = parser.add_mutually_exclusive_group(required=True)
     instruction_group.add_argument("--instruction")
     instruction_group.add_argument("--instruction-file")
-    parser.add_argument("--action-runner", default=_env("UNITREE_ACTION_RUNNER", "action_runner"))
+    add_executor_arguments(parser)
     parser.add_argument("--connect-timeout", type=float, default=float(_env("VLN_CONNECT_TIMEOUT", "5")))
     parser.add_argument("--read-timeout", type=float, default=float(_env("VLN_READ_TIMEOUT", "150")))
     parser.add_argument("--retries", type=int, default=int(_env("VLN_HTTP_RETRIES", "1")))
@@ -213,8 +216,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-width", type=int, default=int(_env("VLN_CAMERA_WIDTH", "640")))
     parser.add_argument("--camera-height", type=int, default=int(_env("VLN_CAMERA_HEIGHT", "480")))
     parser.add_argument("--camera-fps", type=int, default=int(_env("REALSENSE_CAMERA_FPS", "30")))
-    parser.add_argument("--forward-speed", type=float, default=float(_env("UNITREE_FORWARD_SPEED", "0.25")))
-    parser.add_argument("--turn-speed-deg", type=float, default=float(_env("UNITREE_TURN_SPEED_DEG", "15")))
     return parser.parse_args()
 
 
@@ -239,11 +240,7 @@ def main() -> None:
         read_timeout_s=args.read_timeout,
         retries=args.retries,
     )
-    executor = ActionRunnerExecutor(
-        args.action_runner,
-        forward_speed_mps=args.forward_speed,
-        turn_speed_radps=math.radians(args.turn_speed_deg),
-    )
+    executor = create_executor(args)
     camera = RealSenseCamera(
         width=args.camera_width,
         height=args.camera_height,
@@ -265,7 +262,10 @@ def main() -> None:
         try:
             executor.stop()
         finally:
-            client.close()
+            try:
+                executor.close()
+            finally:
+                client.close()
 
 
 if __name__ == "__main__":
