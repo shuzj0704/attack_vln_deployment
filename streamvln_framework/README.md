@@ -373,10 +373,10 @@ curl -fsS "http://$ROBOT_IP:5803/health"
 cd /home/shu22/navigation/indoor_vln/attack_vln_deployment
 python3 -m streamvln_framework.examples.fetch_robot_rgb \
   --server-url "http://$ROBOT_IP:5803" \
-  --output robot_rgb.jpg
+  --output streamvln_framework/examples/robot_rgb.jpg
 ```
 
-成功后当前目录出现 `robot_rgb.jpg`，图像内容正确即说明 RGB 通信链路通。
+成功后 `streamvln_framework/examples/robot_rgb.jpg` 出现，图像内容正确即说明 RGB 通信链路通。
 
 ### 5.4 停止
 
