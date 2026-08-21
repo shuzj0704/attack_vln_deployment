@@ -103,7 +103,43 @@ curl -fsS http://127.0.0.1:5801/health
 
 Robot 必须能导入 `rclpy`、`cv_bridge`、`sensor_msgs`、`unitree_api` 和 `unitree_go`。
 
-### 3.1 安装 RealSense SDK 与 ROS2 wrapper
+### 3.1 配置 Unitree ROS2 环境
+
+所有 ROS2 命令必须先 source Unitree 环境：
+
+```bash
+source ~/unitree_ros2/setup.sh
+```
+
+该脚本会：
+- 加载 `/opt/ros/foxy/setup.bash`
+- 加载 CycloneDDS
+- 把 DDS 网卡绑定到机器人内部网卡 `eth0`
+
+然后检查关键 topic 是否已经发布：
+
+```bash
+ros2 topic list | grep -E 'sportmodestate|api/sport'
+```
+
+期望看到：
+
+- `/lf/sportmodestate`（或 `/sportmodestate`）
+- `/api/sport/request`
+
+如果只列出 `/parameter_events` 和 `/rosout`，说明机器人状态机尚未激活，需要启动 sport client：
+
+```bash
+~/unitree_ros2/example/install/unitree_ros2_example/bin/go2_sport_client 10
+```
+
+执行后应能看到 `/lf/sportmodestate` 等 topic 开始发布。若仍看不到，检查 `CYCLONEDDS_URI` 里的 interface 是否为 `eth0`（无线网卡 `wlan0` 或 ZeroTier 会导致订阅不到机器人内部 topic），必要时重启 ros2 daemon：
+
+```bash
+ros2 daemon stop && ros2 daemon start
+```
+
+### 3.2 安装 RealSense SDK 与 ROS2 wrapper
 
 启动前先确认 RealSense RGB topic 是否已存在：
 
@@ -112,7 +148,7 @@ source ~/unitree_ros2/setup.sh
 ros2 topic list | grep -E 'color/image_raw|sportmodestate'
 ```
 
-若已看到 `/camera/color/image_raw`（或类似名字），跳过本节直接到 3.2。
+若已看到 `/camera/color/image_raw`（或类似名字），跳过本节直接到 3.3。
 
 否则在 Unitree 上编译安装：
 
@@ -152,7 +188,7 @@ colcon build --packages-select realsense2_camera realsense2_camera_msgs
 > 如果开发板有 CUDA 且需要 GPU 加速深度/点云处理，可将 `-DBUILD_WITH_CUDA=false` 改为 `true`，并确保 `nvcc` 在 PATH 中（Jetson 上通常为 `/usr/local/cuda/bin/nvcc`）。
 > 仅用于 RGB 时，关闭 CUDA 更简单可靠。
 
-### 3.2 启动 RealSense 并检查 topic
+### 3.3 启动 RealSense 并检查 topic
 
 ```bash
 source /opt/ros/foxy/setup.bash
@@ -171,7 +207,7 @@ ros2 topic hz /camera/color/image_raw
 
 > 注意：不同 wrapper 版本或 launch 参数下，RGB topic 可能是 `/camera/color/image_raw` 或 `/camera/camera/color_image_raw`。启动 service 时通过 `--rgb-topic` 对齐实际 topic。
 
-### 3.3 启动 streamvln service / client
+### 3.4 启动 streamvln service / client
 
 确认机器人站稳、周围无障碍和台阶、遥控器急停可用后，先验证本机 StopMove：
 
@@ -320,7 +356,7 @@ python3 -m streamvln_framework.examples.test_actions --yes
 
 本节验证 Unitree 能通过 RealSense 发布 RGB，Host 能通过 HTTP 获取单帧图像。
 
-> 前提：RealSense 驱动与 ROS2 wrapper 已按 [3.1 节](#31-安装-realsense-sdk-与-ros2-wrapper) 安装并编译好。
+> 前提：RealSense 驱动与 ROS2 wrapper 已按 [3.2 节](#32-安装-realsense-sdk-与-ros2-wrapper) 安装并编译好。
 
 ### 5.1 启动 RealSense 与 service
 
